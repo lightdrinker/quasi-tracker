@@ -40,7 +40,7 @@ button {
 
 .app-shell {
   min-height: 100vh;
-  padding: 24px;
+  padding: 24px 24px 64px;
 }
 
 .topbar {
@@ -384,6 +384,24 @@ dialog::backdrop {
   background: rgba(14, 25, 38, 0.45);
 }
 
+.site-footer {
+  align-items: center;
+  backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.92);
+  border-top: 1px solid var(--line);
+  bottom: 0;
+  color: var(--muted);
+  display: flex;
+  font-size: 12px;
+  font-weight: 700;
+  height: 38px;
+  justify-content: center;
+  left: 0;
+  position: fixed;
+  right: 0;
+  z-index: 1000;
+}
+
 .dialog-header {
   align-items: flex-start;
   border-bottom: 1px solid var(--line);
@@ -456,7 +474,7 @@ dialog::backdrop {
 
 @media (max-width: 980px) {
   .app-shell {
-    padding: 14px;
+    padding: 14px 14px 58px;
   }
 
   .topbar,
