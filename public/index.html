@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Quasi Tracker</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">MFDS quasi-drug permission data</p>
+          <h1>Quasi Tracker</h1>
+        </div>
+        <div class="sync-panel">
+          <span id="syncStatus" class="sync-status">Ready</span>
+          <button id="refreshButton" class="primary-button" type="button">Refresh</button>
+        </div>
+      </header>
+
+      <main>
+        <section class="summary-grid" aria-label="summary">
+          <div class="metric">
+            <span>Total</span>
+            <strong id="metricTotal">0</strong>
+          </div>
+          <div class="metric">
+            <span>Normal</span>
+            <strong id="metricNormal">0</strong>
+          </div>
+          <div class="metric">
+            <span>Inactive</span>
+            <strong id="metricInactive">0</strong>
+          </div>
+          <div class="metric">
+            <span>New 30D</span>
+            <strong id="metricRecent">0</strong>
+          </div>
+          <div class="metric">
+            <span>Changed</span>
+            <strong id="metricChanged">0</strong>
+          </div>
+        </section>
+
+        <section class="layout-grid">
+          <aside class="filters" aria-label="filters">
+            <div class="field">
+              <label for="searchInput">Search</label>
+              <input id="searchInput" type="search" placeholder="제품명, 업체명, 성분, 품목코드">
+            </div>
+
+            <div class="field">
+              <label for="statusFilter">Status</label>
+              <select id="statusFilter"></select>
+            </div>
+
+            <div class="field">
+              <label for="classFilter">Category</label>
+              <select id="classFilter"></select>
+            </div>
+
+            <div class="field split">
+              <div>
+                <label for="permitFilter">Permit</label>
+                <select id="permitFilter"></select>
+              </div>
+              <div>
+                <label for="indutyFilter">Origin</label>
+                <select id="indutyFilter"></select>
+              </div>
+            </div>
+
+            <div class="field split">
+              <div>
+                <label for="fromDate">From</label>
+                <input id="fromDate" type="date">
+              </div>
+              <div>
+                <label for="toDate">To</label>
+                <input id="toDate" type="date">
+              </div>
+            </div>
+
+            <div class="filter-actions">
+              <button id="resetButton" type="button">Reset</button>
+              <button id="exportButton" type="button">Export CSV</button>
+            </div>
+
+            <div class="mini-board">
+              <h2>Top Categories</h2>
+              <ol id="topCategories"></ol>
+            </div>
+
+            <div class="mini-board">
+              <h2>Top Companies</h2>
+              <ol id="topCompanies"></ol>
+            </div>
+          </aside>
+
+          <section class="workbench">
+            <div class="table-toolbar">
+              <div>
+                <h2>Products</h2>
+                <p id="resultCount">0 results</p>
+              </div>
+              <div class="toolbar-controls">
+                <select id="sortSelect" aria-label="sort">
+                  <option value="permitDateDesc">허가일 최신순</option>
+                  <option value="permitDateAsc">허가일 오래된순</option>
+                  <option value="nameAsc">제품명순</option>
+                  <option value="companyAsc">업체명순</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>품목코드</th>
+                    <th>제품명</th>
+                    <th>업체명</th>
+                    <th>허가일</th>
+                    <th>상태</th>
+                    <th>분류</th>
+                  </tr>
+                </thead>
+                <tbody id="productRows"></tbody>
+              </table>
+            </div>
+
+            <div class="pagination">
+              <button id="prevPage" type="button">Prev</button>
+              <span id="pageInfo">1 / 1</span>
+              <button id="nextPage" type="button">Next</button>
+            </div>
+
+            <section class="changes">
+              <h2>Latest Changes</h2>
+              <div id="changeList" class="change-list"></div>
+            </section>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="detailDialog">
+      <div class="dialog-header">
+        <div>
+          <p id="detailCode" class="eyebrow"></p>
+          <h2 id="detailTitle"></h2>
+        </div>
+        <button id="closeDetail" type="button" aria-label="Close">×</button>
+      </div>
+      <div id="detailBody" class="detail-body"></div>
+    </dialog>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>
