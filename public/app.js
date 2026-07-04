@@ -30,6 +30,7 @@ function bindElements() {
     "metricRecent",
     "metricChanged",
     "searchInput",
+    "withinSearchInput",
     "statusFilter",
     "classFilter",
     "permitFilter",
@@ -67,6 +68,7 @@ function bindEvents() {
 
   for (const input of [
     elements.searchInput,
+    elements.withinSearchInput,
     elements.statusFilter,
     elements.classFilter,
     elements.permitFilter,
@@ -275,6 +277,7 @@ function uniqueSorted(values) {
 
 function applyFilters() {
   const query = elements.searchInput.value.trim().toLowerCase();
+  const withinQuery = elements.withinSearchInput.value.trim().toLowerCase();
   const status = elements.statusFilter.value;
   const className = elements.classFilter.value;
   const permit = elements.permitFilter.value;
@@ -306,6 +309,10 @@ function applyFilters() {
     }
     return true;
   });
+
+  if (withinQuery) {
+    state.filteredRows = state.filteredRows.filter((row) => getSearchText(row).includes(withinQuery));
+  }
 
   sortFilteredRows();
   render();
@@ -552,6 +559,7 @@ function docFingerprint(row) {
 
 function resetFilters() {
   elements.searchInput.value = "";
+  elements.withinSearchInput.value = "";
   elements.statusFilter.value = "";
   elements.classFilter.value = "";
   elements.permitFilter.value = "";
