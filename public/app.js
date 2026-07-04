@@ -1,8 +1,8 @@
-const PAGE_SIZE = 500;
 const TABLE_PAGE_SIZE = 50;
 const DB_NAME = "quasi-tracker";
 const DB_VERSION = 1;
 const STORE_NAME = "snapshots";
+const MANIFEST_URL = "https://raw.githubusercontent.com/lightdrinker/quasi-tracker/data/manifest.json";
 
 const state = {
   rows: [],
@@ -91,14 +91,12 @@ async function loadSnapshot() {
   if (snapshot && Array.isArray(snapshot.rows)) {
     state.rows = snapshot.rows;
     state.changes = snapshot.changes || [];
-    setStatus(`Last refreshed ${formatDateTime(snapshot.syncedAt)}`);
+    setStatus(`Cached snapshot ${formatDateTime(snapshot.syncedAt)}`);
     hydrateFilters();
     applyFilters();
   }
 
-  if (!snapshot || shouldRefresh(snapshot.syncedAt)) {
-    await syncAll({ force: false });
-  }
+  await syncAll({ force: false });
 }
 
 async function syncAll({ force }) {
@@ -110,38 +108,35 @@ async function syncAll({ force }) {
   elements.refreshButton.disabled = true;
 
   try {
-    const previousRows = state.rows;
-    const firstPage = await fetchPage(1);
-    const totalCount = Number(firstPage.body && firstPage.body.totalCount ? firstPage.body.totalCount : 0);
-    const totalPages = Math.ceil(totalCount / PAGE_SIZE);
-    const rows = extractItems(firstPage);
+    setStatus("Checking central snapshot");
+    const localSnapshot = await readSnapshot();
+    const manifest = await fetchManifest();
 
-    setStatus(`Refreshing 1 / ${totalPages}`);
-
-    for (let page = 2; page <= totalPages; page += 1) {
-      const pageData = await fetchPage(page);
-      rows.push(...extractItems(pageData));
-      setStatus(`Refreshing ${page} / ${totalPages}`);
+    if (!force && localSnapshot && localSnapshot.rowsHash === manifest.rowsHash) {
+      setStatus(`Latest central snapshot ${formatDateTime(manifest.syncedAt)}`);
+      return;
     }
 
-    const normalizedRows = rows.map(normalizeItem).sort(sortByPermitDateDesc);
-    const changes = detectChanges(previousRows, normalizedRows);
+    setStatus("Downloading central snapshot");
+    const centralSnapshot = await fetchCentralSnapshot(manifest);
+    const normalizedRows = centralSnapshot.rows.map(normalizeSnapshotRow).sort(sortByPermitDateDesc);
     const snapshot = {
-      syncedAt: new Date().toISOString(),
-      totalCount,
+      syncedAt: centralSnapshot.syncedAt || manifest.syncedAt,
+      totalCount: centralSnapshot.totalCount || manifest.totalCount || normalizedRows.length,
+      rowsHash: centralSnapshot.rowsHash || manifest.rowsHash,
       rows: normalizedRows,
-      changes
+      changes: centralSnapshot.changes || []
     };
 
     await writeSnapshot(snapshot);
     state.rows = normalizedRows;
-    state.changes = changes;
+    state.changes = snapshot.changes;
     hydrateFilters();
     state.currentPage = 1;
     applyFilters();
-    setStatus(`Refreshed ${normalizedRows.length.toLocaleString()} items`);
+    setStatus(`Loaded central snapshot ${formatDateTime(snapshot.syncedAt)}`);
   } catch (error) {
-    setStatus(`Refresh failed: ${error.message}`);
+    setStatus(`Snapshot sync failed: ${error.message}`);
     if (force || !state.rows.length) {
       renderEmpty(error.message);
     }
@@ -151,48 +146,50 @@ async function syncAll({ force }) {
   }
 }
 
-async function fetchPage(pageNo) {
-  const response = await fetch(`/api/qdrg?pageNo=${pageNo}&numOfRows=${PAGE_SIZE}&type=json`);
+async function fetchManifest() {
+  const url = new URL(MANIFEST_URL);
+  url.searchParams.set("t", String(Date.now()));
+  const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) {
-    throw new Error(`API request failed with ${response.status}`);
+    throw new Error(`Manifest request failed with ${response.status}`);
   }
 
-  const payload = await response.json();
-  const header = payload.header || {};
-  if (header.resultCode && header.resultCode !== "00") {
-    throw new Error(header.resultMsg || `API returned ${header.resultCode}`);
+  return response.json();
+}
+
+async function fetchCentralSnapshot(manifest) {
+  const snapshotUrl = new URL(manifest.snapshotUrl || "snapshot.json", MANIFEST_URL);
+  snapshotUrl.searchParams.set("v", manifest.rowsHash || String(Date.now()));
+  const response = await fetch(snapshotUrl, { cache: "reload" });
+  if (!response.ok) {
+    throw new Error(`Snapshot request failed with ${response.status}`);
   }
 
-  return payload;
+  return response.json();
 }
 
-function extractItems(payload) {
-  const items = payload && payload.body && Array.isArray(payload.body.items) ? payload.body.items : [];
-  return items.map((entry) => entry.item || entry);
-}
-
-function normalizeItem(item) {
+function normalizeSnapshotRow(item) {
   return {
-    itemSeq: cleanValue(item.ITEM_SEQ),
-    itemName: cleanValue(item.ITEM_NAME),
-    entpName: cleanValue(item.ENTP_NAME),
-    itemPermitDate: cleanDate(item.ITEM_PERMIT_DATE),
-    itemNo: cleanValue(item.ITEM_NO),
-    cancelCodeName: cleanValue(item.CANCEL_CODE_NAME) || "미기재",
-    cancelDate: cleanDate(item.CANCEL_DATE),
-    mainIngr: cleanValue(item.MAIN_INGR),
-    aditIngr: cleanValue(item.ADIT_INGR),
-    classNo: cleanValue(item.CLASS_NO),
-    classNoName: cleanValue(item.CLASS_NO_NAME),
-    permitKind: cleanValue(item.PERMIT_KIND_CODE_NM),
-    indutyCode: cleanValue(item.INDUTY_CODE),
-    manufCountryNames: cleanValue(item.MANUF_COUNTRY_NAMES),
-    entpNo: cleanValue(item.ENTP_NO),
-    entpSeq: cleanValue(item.ENTP_SEQ),
-    bizrno: cleanValue(item.BIZRNO),
-    efficacyText: extractDocText(item.EE_DOC_DATA),
-    dosageText: extractDocText(item.UD_DOC_DATA),
-    cautionText: extractDocText(item.NB_DOC_DATA)
+    itemSeq: cleanValue(item.itemSeq),
+    itemName: cleanValue(item.itemName),
+    entpName: cleanValue(item.entpName),
+    itemPermitDate: cleanDate(item.itemPermitDate),
+    itemNo: cleanValue(item.itemNo),
+    cancelCodeName: cleanValue(item.cancelCodeName) || "미기재",
+    cancelDate: cleanDate(item.cancelDate),
+    mainIngr: cleanValue(item.mainIngr),
+    aditIngr: cleanValue(item.aditIngr),
+    classNo: cleanValue(item.classNo),
+    classNoName: cleanValue(item.classNoName),
+    permitKind: cleanValue(item.permitKind),
+    indutyCode: cleanValue(item.indutyCode),
+    manufCountryNames: cleanValue(item.manufCountryNames),
+    entpNo: cleanValue(item.entpNo),
+    entpSeq: cleanValue(item.entpSeq),
+    bizrno: cleanValue(item.bizrno),
+    efficacyText: cleanValue(item.efficacyText),
+    dosageText: cleanValue(item.dosageText),
+    cautionText: cleanValue(item.cautionText)
   };
 }
 
@@ -209,47 +206,6 @@ function cleanDate(value) {
     return `${cleaned.slice(0, 4)}-${cleaned.slice(4, 6)}-${cleaned.slice(6, 8)}`;
   }
   return cleaned;
-}
-
-function extractDocText(xmlText) {
-  const source = cleanValue(xmlText);
-  if (!source) {
-    return "";
-  }
-
-  try {
-    const doc = new DOMParser().parseFromString(source, "text/xml");
-    const parserError = doc.querySelector("parsererror");
-    if (parserError) {
-      return stripXml(source);
-    }
-
-    const parts = [];
-    for (const article of doc.querySelectorAll("ARTICLE")) {
-      const title = cleanValue(article.getAttribute("title"));
-      if (title) {
-        parts.push(title);
-      }
-      for (const paragraph of article.querySelectorAll("PARAGRAPH")) {
-        const text = cleanValue(paragraph.textContent);
-        if (text) {
-          parts.push(text);
-        }
-      }
-    }
-    return parts.join("\n");
-  } catch {
-    return stripXml(source);
-  }
-}
-
-function stripXml(value) {
-  return value
-    .replace(/<!\[CDATA\[/g, "")
-    .replace(/\]\]>/g, "")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 function hydrateFilters() {
@@ -506,57 +462,6 @@ function textSection(title, value) {
   `;
 }
 
-function detectChanges(previousRows, nextRows) {
-  if (!previousRows.length) {
-    return nextRows.slice(0, 20).map((row) => ({
-      type: "new snapshot",
-      itemSeq: row.itemSeq,
-      itemName: row.itemName,
-      detail: `${row.entpName} · ${row.classNoName}`
-    }));
-  }
-
-  const previous = new Map(previousRows.map((row) => [row.itemSeq, row]));
-  const changes = [];
-
-  for (const row of nextRows) {
-    const old = previous.get(row.itemSeq);
-    if (!old) {
-      changes.push({
-        type: "new",
-        itemSeq: row.itemSeq,
-        itemName: row.itemName,
-        detail: `${row.itemPermitDate} · ${row.entpName}`
-      });
-      continue;
-    }
-
-    if (old.cancelCodeName !== row.cancelCodeName) {
-      changes.push({
-        type: "status",
-        itemSeq: row.itemSeq,
-        itemName: row.itemName,
-        detail: `${old.cancelCodeName || "-"} → ${row.cancelCodeName || "-"}`
-      });
-    }
-
-    if (docFingerprint(old) !== docFingerprint(row)) {
-      changes.push({
-        type: "document",
-        itemSeq: row.itemSeq,
-        itemName: row.itemName,
-        detail: "효능효과/용법용량/주의사항 문서 변경"
-      });
-    }
-  }
-
-  return changes;
-}
-
-function docFingerprint(row) {
-  return [row.efficacyText, row.dosageText, row.cautionText].join("|");
-}
-
 function resetFilters() {
   elements.searchInput.value = "";
   elements.withinSearchInput.value = "";
@@ -616,33 +521,6 @@ function exportCsv() {
 
 function csvCell(value) {
   return `"${String(value || "").replace(/"/g, '""')}"`;
-}
-
-function shouldRefresh(syncedAt) {
-  if (!syncedAt) {
-    return true;
-  }
-  const last = new Date(syncedAt);
-  return last < getCurrentKstRefreshBoundary();
-}
-
-function getCurrentKstRefreshBoundary() {
-  const now = new Date();
-  const kstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-  const boundaryUtcMs = Date.UTC(
-    kstNow.getUTCFullYear(),
-    kstNow.getUTCMonth(),
-    kstNow.getUTCDate(),
-    7 - 9,
-    0,
-    0,
-    0
-  );
-  const boundary = new Date(boundaryUtcMs);
-  if (now < boundary) {
-    boundary.setUTCDate(boundary.getUTCDate() - 1);
-  }
-  return boundary;
 }
 
 function getDateDaysAgo(days) {

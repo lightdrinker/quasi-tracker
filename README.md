@@ -6,7 +6,7 @@ Daily tracker for Korean quasi-drug product permission data from the public data
 
 ## Features
 
-- Daily client-side snapshot renewal after 07:00 KST
+- Daily central snapshot renewal through GitHub Actions after 07:00 KST
 - Full local search and filtering over the latest snapshot
 - Change detection between snapshots
 - Detail drawer for ingredients, efficacy, dosage, and cautions
@@ -32,3 +32,12 @@ Then open `http://localhost:3000`.
 ## Vercel
 
 Set `QDRG_SERVICE_KEY` as a Vercel environment variable for production.
+
+## Daily Snapshot
+
+The browser no longer refreshes the full public API per device. Instead:
+
+1. GitHub Actions runs every day at 07:10 KST.
+2. `scripts/build-snapshot.mjs` fetches the API through the deployed Vercel proxy.
+3. The generated `manifest.json` and `snapshot.json` are force-pushed to the `data` branch.
+4. The app checks the small manifest first and only downloads the central snapshot when `rowsHash` changes.

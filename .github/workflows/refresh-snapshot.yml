@@ -1,0 +1,44 @@
+name: Refresh quasi-drug snapshot
+
+on:
+  schedule:
+    - cron: "10 22 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build snapshot
+        env:
+          QDRG_PROXY_BASE_URL: https://quasi-tracker.vercel.app/api/qdrg
+          PREVIOUS_SNAPSHOT_URL: https://raw.githubusercontent.com/lightdrinker/quasi-tracker/data/snapshot.json
+          SNAPSHOT_OUT_DIR: snapshot-out
+        run: node scripts/build-snapshot.mjs
+
+      - name: Publish data branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git worktree add .data-worktree --detach
+          cd .data-worktree
+          git checkout --orphan data
+          git rm -rf . >/dev/null 2>&1 || true
+          cp ../snapshot-out/snapshot.json ./snapshot.json
+          cp ../snapshot-out/manifest.json ./manifest.json
+          git add snapshot.json manifest.json
+          git commit -m "Refresh quasi snapshot"
+          git push origin HEAD:data --force
