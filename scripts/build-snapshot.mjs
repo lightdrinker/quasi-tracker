@@ -13,6 +13,24 @@ const PREVIOUS_SNAPSHOT_URL = process.env.PREVIOUS_SNAPSHOT_URL || "";
 const PREVIOUS_MANIFEST_URL = process.env.PREVIOUS_MANIFEST_URL || "";
 const BASELINE_RETENTION_MONTHS = Math.max(1, Number(process.env.BASELINE_RETENTION_MONTHS || 12) || 12);
 
+const CHANGE_FIELD_DEFINITIONS = [
+  { key: "itemName", label: "제품명" },
+  { key: "entpName", label: "업체명" },
+  { key: "itemNo", label: "허가번호" },
+  { key: "itemPermitDate", label: "허가일" },
+  { key: "cancelCodeName", label: "상태" },
+  { key: "cancelDate", label: "취소/취하일" },
+  { key: "classNoName", label: "분류" },
+  { key: "permitKind", label: "허가/신고" },
+  { key: "indutyCode", label: "제조/수입" },
+  { key: "manufCountryNames", label: "수입제조국" },
+  { key: "mainIngr", label: "주성분" },
+  { key: "aditIngr", label: "첨가제" },
+  { key: "efficacyText", label: "효능효과" },
+  { key: "dosageText", label: "용법용량" },
+  { key: "cautionText", label: "주의사항" }
+];
+
 async function main() {
   const startedAt = new Date();
   const firstPage = await fetchPage(1);
@@ -326,17 +344,11 @@ function getRecentMonths(currentMonth, count) {
 function detectChanges(previousRows, nextRows, baselineMonth = "") {
   if (!previousRows.length) {
     return nextRows.slice(0, 20).map((row) => ({
-      baselineMonth,
-      type: "new snapshot",
-      itemSeq: row.itemSeq,
-      itemName: row.itemName,
-      entpName: row.entpName,
-      itemPermitDate: row.itemPermitDate,
-      classNoName: row.classNoName,
-      permitKind: row.permitKind,
-      indutyCode: row.indutyCode,
-      cancelCodeName: row.cancelCodeName,
-      detail: `${row.entpName} · ${row.classNoName}`
+      ...changeMeta(row, baselineMonth),
+      kind: "new",
+      changeTokens: ["new"],
+      fieldChanges: createWholeItemFieldChanges(null, row),
+      detail: "신규 품목"
     }));
   }
 
@@ -349,29 +361,22 @@ function detectChanges(previousRows, nextRows, baselineMonth = "") {
     if (!old) {
       changes.push({
         ...changeMeta(row, baselineMonth),
-        type: "new",
-        detail: `${row.itemPermitDate} · ${row.entpName}`
+        kind: "new",
+        changeTokens: ["new"],
+        fieldChanges: createWholeItemFieldChanges(null, row),
+        detail: "신규 품목"
       });
       continue;
     }
 
-    if (old.cancelCodeName !== row.cancelCodeName) {
+    const fieldChanges = createFieldChanges(old, row);
+    if (fieldChanges.length) {
       changes.push({
         ...changeMeta(row, baselineMonth),
-        type: "status",
-        from: old.cancelCodeName || "-",
-        to: row.cancelCodeName || "-",
-        detail: `${old.cancelCodeName || "-"} -> ${row.cancelCodeName || "-"}`
-      });
-    }
-
-    const changedFields = changedDocumentFields(old, row);
-    if (changedFields.length) {
-      changes.push({
-        ...changeMeta(row, baselineMonth),
-        type: "document",
-        changedFields,
-        detail: `${changedFields.join("/")} 변경`
+        kind: "changed",
+        changeTokens: fieldChanges.map((field) => field.key),
+        fieldChanges,
+        detail: summarizeFieldChanges(fieldChanges)
       });
     }
   }
@@ -380,7 +385,9 @@ function detectChanges(previousRows, nextRows, baselineMonth = "") {
     if (!next.has(old.itemSeq)) {
       changes.push({
         ...changeMeta(old, baselineMonth),
-        type: "removed",
+        kind: "removed",
+        changeTokens: ["removed"],
+        fieldChanges: createWholeItemFieldChanges(old, null),
         detail: "기준월 이후 최신 DB에서 제외"
       });
     }
@@ -403,13 +410,30 @@ function changeMeta(row, baselineMonth) {
   };
 }
 
-function changedDocumentFields(oldRow, nextRow) {
-  const fields = [
-    ["efficacyText", "효능효과"],
-    ["dosageText", "용법용량"],
-    ["cautionText", "주의사항"]
-  ];
-  return fields.filter(([key]) => oldRow[key] !== nextRow[key]).map(([, label]) => label);
+function createFieldChanges(oldRow, nextRow) {
+  return CHANGE_FIELD_DEFINITIONS.flatMap((field) => {
+    const before = oldRow[field.key] || "";
+    const after = nextRow[field.key] || "";
+    if (before === after) {
+      return [];
+    }
+    return [{ ...field, before, after }];
+  });
+}
+
+function createWholeItemFieldChanges(beforeRow, afterRow) {
+  return CHANGE_FIELD_DEFINITIONS.map((field) => ({
+    ...field,
+    before: beforeRow?.[field.key] || "",
+    after: afterRow?.[field.key] || ""
+  })).filter((field) => field.before || field.after);
+}
+
+function summarizeFieldChanges(fieldChanges) {
+  const labels = fieldChanges.map((field) => field.label);
+  const preview = labels.slice(0, 4).join(", ");
+  const restCount = labels.length - 4;
+  return restCount > 0 ? `${preview} 외 ${restCount}개 변경` : `${preview} 변경`;
 }
 
 function hashJson(value) {

@@ -9,6 +9,7 @@ Daily tracker for Korean quasi-drug product permission data from the public data
 - Daily central snapshot renewal through GitHub Actions after 07:00 KST
 - Full local search and filtering over the latest snapshot
 - Monthly baseline change detection with 12 months of fixed baseline retention
+- Item-level change summaries with field-by-field before/after detail dialogs
 - Detail drawer for ingredients, efficacy, dosage, and cautions
 - Vercel serverless proxy so the service key is not exposed in browser code
 
@@ -53,4 +54,4 @@ baselines/2026-06.json
 ...
 ```
 
-On each refresh, the current month baseline is created only if it does not already exist. Older baseline files outside the latest 12 months are omitted from the next generated data branch update. The app compares a selected baseline month against the latest snapshot and lets users filter or export those changes.
+On each refresh, the current month baseline is created only if it does not already exist. Older baseline files outside the latest 12 months are omitted from the next generated data branch update. The app compares a selected baseline month against the latest snapshot and lets users filter or export item-level changes. Clicking a changed item opens a dialog with field-by-field before/after values.

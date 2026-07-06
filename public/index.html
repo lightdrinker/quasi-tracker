@@ -161,7 +161,7 @@
                   <select id="baselineSelect"></select>
                 </div>
                 <div class="field">
-                  <label for="changeTypeFilter">Change type</label>
+                  <label for="changeTypeFilter">Change field</label>
                   <select id="changeTypeFilter"></select>
                 </div>
                 <div class="field">
@@ -182,7 +182,7 @@
                 </div>
                 <div class="field change-search-field">
                   <label for="changeSearchInput">Search changes</label>
-                  <input id="changeSearchInput" type="search" placeholder="제품명, 업체명, 품목코드, 변경내용">
+                  <input id="changeSearchInput" type="search" placeholder="제품명, 업체명, 품목코드, 변경필드">
                 </div>
               </div>
 
@@ -197,7 +197,7 @@
                       <th>분류</th>
                       <th>허가일</th>
                       <th>상태</th>
-                      <th>변경내용</th>
+                      <th>변경필드</th>
                     </tr>
                   </thead>
                   <tbody id="changeRows"></tbody>
@@ -218,6 +218,17 @@
         <button id="closeDetail" type="button" aria-label="Close">×</button>
       </div>
       <div id="detailBody" class="detail-body"></div>
+    </dialog>
+
+    <dialog id="changeDialog">
+      <div class="dialog-header">
+        <div>
+          <p id="changeDetailCode" class="eyebrow"></p>
+          <h2 id="changeDetailTitle"></h2>
+        </div>
+        <button id="closeChangeDetail" type="button" aria-label="Close">×</button>
+      </div>
+      <div id="changeDetailBody" class="detail-body"></div>
     </dialog>
 
     <footer class="site-footer" aria-label="site credit">

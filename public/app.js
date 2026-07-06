@@ -5,12 +5,10 @@ const STORE_NAME = "snapshots";
 const MANIFEST_URL = "https://raw.githubusercontent.com/lightdrinker/quasi-tracker/data/manifest.json";
 const COLUMN_STORAGE_KEY = "quasi-tracker-visible-columns";
 
-const CHANGE_TYPE_LABELS = {
+const CHANGE_KIND_LABELS = {
+  changed: "변경",
   new: "신규",
-  status: "상태변경",
-  document: "문서변경",
-  removed: "삭제",
-  "new snapshot": "신규"
+  removed: "삭제"
 };
 
 const COLUMN_DEFINITIONS = [
@@ -37,6 +35,26 @@ const COLUMN_DEFINITIONS = [
 ];
 
 const COLUMN_BY_KEY = new Map(COLUMN_DEFINITIONS.map((column) => [column.key, column]));
+
+const CHANGE_FIELD_DEFINITIONS = [
+  { key: "itemName", label: "제품명" },
+  { key: "entpName", label: "업체명" },
+  { key: "itemNo", label: "허가번호" },
+  { key: "itemPermitDate", label: "허가일" },
+  { key: "cancelCodeName", label: "상태" },
+  { key: "cancelDate", label: "취소/취하일" },
+  { key: "classNoName", label: "분류" },
+  { key: "permitKind", label: "허가/신고" },
+  { key: "indutyCode", label: "제조/수입" },
+  { key: "manufCountryNames", label: "수입제조국" },
+  { key: "mainIngr", label: "주성분" },
+  { key: "aditIngr", label: "첨가제" },
+  { key: "efficacyText", label: "효능효과" },
+  { key: "dosageText", label: "용법용량" },
+  { key: "cautionText", label: "주의사항" }
+];
+
+const CHANGE_FIELD_BY_KEY = new Map(CHANGE_FIELD_DEFINITIONS.map((field) => [field.key, field]));
 
 const state = {
   manifest: null,
@@ -109,7 +127,12 @@ function bindElements() {
     "detailCode",
     "detailTitle",
     "detailBody",
-    "closeDetail"
+    "closeDetail",
+    "changeDialog",
+    "changeDetailCode",
+    "changeDetailTitle",
+    "changeDetailBody",
+    "closeChangeDetail"
   ]) {
     elements[id] = document.getElementById(id);
   }
@@ -122,6 +145,7 @@ function bindEvents() {
   elements.prevPage.addEventListener("click", () => setPage(state.currentPage - 1));
   elements.nextPage.addEventListener("click", () => setPage(state.currentPage + 1));
   elements.closeDetail.addEventListener("click", () => elements.detailDialog.close());
+  elements.closeChangeDetail.addEventListener("click", () => elements.changeDialog.close());
   elements.selectedColumns.addEventListener("click", handleColumnAction);
   elements.availableColumns.addEventListener("click", handleColumnAction);
   elements.baselineSelect.addEventListener("change", async () => {
@@ -390,12 +414,13 @@ function hydrateFilters() {
 
 function hydrateChangeFilters() {
   const currentType = elements.changeTypeFilter.value;
+  const tokens = uniqueChangeTokens(state.changes);
   elements.changeTypeFilter.innerHTML = "";
   elements.changeTypeFilter.append(new Option("All changes", ""));
-  for (const type of uniqueSorted(state.changes.map((change) => change.type))) {
-    elements.changeTypeFilter.append(new Option(getChangeTypeLabel(type), type));
+  for (const token of tokens) {
+    elements.changeTypeFilter.append(new Option(getChangeTokenLabel(token), token));
   }
-  elements.changeTypeFilter.value = state.changes.some((change) => change.type === currentType) ? currentType : "";
+  elements.changeTypeFilter.value = tokens.includes(currentType) ? currentType : "";
 
   setOptions(elements.changeClassFilter, "All categories", uniqueSorted(state.changes.map((change) => change.classNoName)));
   setOptions(elements.changeStatusFilter, "All status", uniqueSorted(state.changes.map((change) => change.cancelCodeName)));
@@ -420,7 +445,7 @@ function uniqueSorted(values) {
 }
 
 function applyChangeFilters() {
-  const type = elements.changeTypeFilter.value;
+  const token = elements.changeTypeFilter.value;
   const className = elements.changeClassFilter.value;
   const status = elements.changeStatusFilter.value;
   const permit = elements.changePermitFilter.value;
@@ -428,7 +453,7 @@ function applyChangeFilters() {
   const query = elements.changeSearchInput.value.trim().toLowerCase();
 
   state.filteredChanges = state.changes.filter((change) => {
-    if (type && change.type !== type) {
+    if (token && !(change.changeTokens || []).includes(token)) {
       return false;
     }
     if (className && change.classNoName !== className) {
@@ -768,7 +793,7 @@ function renderChanges() {
   for (const change of state.filteredChanges) {
     const row = document.createElement("tr");
     row.innerHTML = `
-      <td>${renderChangeBadge(change.type)}</td>
+      <td>${renderChangeBadge(change.kind)}</td>
       <td class="code-cell"><span class="truncate-cell" title="${escapeHtml(change.itemSeq || "-")}">${escapeHtml(change.itemSeq || "-")}</span></td>
       <td class="name-cell"><span class="truncate-cell" title="${escapeHtml(change.itemName || "-")}">${escapeHtml(change.itemName || "-")}</span></td>
       <td><span class="truncate-cell" title="${escapeHtml(change.entpName || "-")}">${escapeHtml(change.entpName || "-")}</span></td>
@@ -777,19 +802,14 @@ function renderChanges() {
       <td><span class="truncate-cell" title="${escapeHtml(change.cancelCodeName || "-")}">${escapeHtml(change.cancelCodeName || "-")}</span></td>
       <td><span class="truncate-cell" title="${escapeHtml(change.detail || "-")}">${escapeHtml(change.detail || "-")}</span></td>
     `;
-    row.addEventListener("click", () => {
-      const currentItem = state.rows.find((item) => item.itemSeq === change.itemSeq);
-      if (currentItem) {
-        openDetail(currentItem);
-      }
-    });
+    row.addEventListener("click", () => openChangeDetail(change));
     elements.changeRows.append(row);
   }
 }
 
-function renderChangeBadge(type) {
-  const className = String(type || "unknown").replace(/\s+/g, "-");
-  return `<span class="change-badge ${escapeHtml(className)}">${escapeHtml(getChangeTypeLabel(type))}</span>`;
+function renderChangeBadge(kind) {
+  const className = String(kind || "unknown").replace(/\s+/g, "-");
+  return `<span class="change-badge ${escapeHtml(className)}">${escapeHtml(getChangeKindLabel(kind))}</span>`;
 }
 
 function detectChanges(baselineRows, currentRows, baselineMonth = "") {
@@ -802,29 +822,22 @@ function detectChanges(baselineRows, currentRows, baselineMonth = "") {
     if (!old) {
       changes.push({
         ...changeMeta(row, baselineMonth),
-        type: "new",
-        detail: `${row.itemPermitDate || "-"} · ${row.entpName || "-"}`
+        kind: "new",
+        changeTokens: ["new"],
+        fieldChanges: createWholeItemFieldChanges(null, row),
+        detail: "신규 품목"
       });
       continue;
     }
 
-    if (old.cancelCodeName !== row.cancelCodeName) {
+    const fieldChanges = createFieldChanges(old, row);
+    if (fieldChanges.length) {
       changes.push({
         ...changeMeta(row, baselineMonth),
-        type: "status",
-        from: old.cancelCodeName || "-",
-        to: row.cancelCodeName || "-",
-        detail: `${old.cancelCodeName || "-"} -> ${row.cancelCodeName || "-"}`
-      });
-    }
-
-    const changedFields = changedDocumentFields(old, row);
-    if (changedFields.length) {
-      changes.push({
-        ...changeMeta(row, baselineMonth),
-        type: "document",
-        changedFields,
-        detail: `${changedFields.join("/")} 변경`
+        kind: "changed",
+        changeTokens: fieldChanges.map((field) => field.key),
+        fieldChanges,
+        detail: summarizeFieldChanges(fieldChanges)
       });
     }
   }
@@ -833,7 +846,9 @@ function detectChanges(baselineRows, currentRows, baselineMonth = "") {
     if (!current.has(old.itemSeq)) {
       changes.push({
         ...changeMeta(old, baselineMonth),
-        type: "removed",
+        kind: "removed",
+        changeTokens: ["removed"],
+        fieldChanges: createWholeItemFieldChanges(old, null),
         detail: "기준월 이후 최신 DB에서 제외"
       });
     }
@@ -856,19 +871,36 @@ function changeMeta(row, baselineMonth) {
   };
 }
 
-function changedDocumentFields(oldRow, nextRow) {
-  const fields = [
-    ["efficacyText", "효능효과"],
-    ["dosageText", "용법용량"],
-    ["cautionText", "주의사항"]
-  ];
-  return fields.filter(([key]) => oldRow[key] !== nextRow[key]).map(([, label]) => label);
+function createFieldChanges(oldRow, nextRow) {
+  return CHANGE_FIELD_DEFINITIONS.flatMap((field) => {
+    const before = oldRow[field.key] || "";
+    const after = nextRow[field.key] || "";
+    if (before === after) {
+      return [];
+    }
+    return [{ ...field, before, after }];
+  });
+}
+
+function createWholeItemFieldChanges(beforeRow, afterRow) {
+  return CHANGE_FIELD_DEFINITIONS.map((field) => ({
+    ...field,
+    before: beforeRow?.[field.key] || "",
+    after: afterRow?.[field.key] || ""
+  })).filter((field) => field.before || field.after);
+}
+
+function summarizeFieldChanges(fieldChanges) {
+  const labels = fieldChanges.map((field) => field.label);
+  const preview = labels.slice(0, 4).join(", ");
+  const restCount = labels.length - 4;
+  return restCount > 0 ? `${preview} 외 ${restCount}개 변경` : `${preview} 변경`;
 }
 
 function getChangeSearchText(change) {
   return [
-    change.type,
-    getChangeTypeLabel(change.type),
+    change.kind,
+    getChangeKindLabel(change.kind),
     change.itemSeq,
     change.itemName,
     change.entpName,
@@ -876,14 +908,35 @@ function getChangeSearchText(change) {
     change.permitKind,
     change.indutyCode,
     change.cancelCodeName,
-    change.detail
+    change.detail,
+    ...(change.fieldChanges || []).flatMap((field) => [field.label, field.before, field.after])
   ]
     .join(" ")
     .toLowerCase();
 }
 
-function getChangeTypeLabel(type) {
-  return CHANGE_TYPE_LABELS[type] || type || "미기재";
+function uniqueChangeTokens(changes) {
+  const tokens = new Set();
+  for (const change of changes) {
+    for (const token of change.changeTokens || []) {
+      tokens.add(token);
+    }
+  }
+  return [...tokens].sort((a, b) => getChangeTokenLabel(a).localeCompare(getChangeTokenLabel(b), "ko"));
+}
+
+function getChangeKindLabel(kind) {
+  return CHANGE_KIND_LABELS[kind] || kind || "미기재";
+}
+
+function getChangeTokenLabel(token) {
+  if (token === "new") {
+    return "신규";
+  }
+  if (token === "removed") {
+    return "삭제";
+  }
+  return CHANGE_FIELD_BY_KEY.get(token)?.label || token || "미기재";
 }
 
 function setPage(page) {
@@ -918,6 +971,51 @@ function openDetail(item) {
     ${textSection("사용상 주의사항", item.cautionText)}
   `;
   elements.detailDialog.showModal();
+}
+
+function openChangeDetail(change) {
+  elements.changeDetailCode.textContent = `${change.baselineMonth || "-"} baseline · ${change.itemSeq || "-"}`;
+  elements.changeDetailTitle.textContent = change.itemName || change.itemSeq || "변경 품목";
+  elements.changeDetailBody.innerHTML = `
+    <section class="detail-section">
+      <h3>변경 요약</h3>
+      <div class="detail-grid">
+        ${kv("변경유형", getChangeKindLabel(change.kind))}
+        ${kv("변경필드", change.detail || "-")}
+        ${kv("업체명", change.entpName || "-")}
+        ${kv("품목분류", change.classNoName || "-")}
+        ${kv("허가일", change.itemPermitDate || "-")}
+        ${kv("상태", change.cancelCodeName || "-")}
+        ${kv("허가/신고", change.permitKind || "-")}
+        ${kv("제조/수입", change.indutyCode || "-")}
+      </div>
+    </section>
+    <section class="detail-section">
+      <h3>필드별 변경사항</h3>
+      <div class="diff-list">
+        ${(change.fieldChanges || []).map(renderFieldChange).join("")}
+      </div>
+    </section>
+  `;
+  elements.changeDialog.showModal();
+}
+
+function renderFieldChange(field) {
+  return `
+    <article class="diff-item">
+      <h4>${escapeHtml(field.label)}</h4>
+      <div class="diff-grid">
+        <div class="diff-panel">
+          <span>기준월</span>
+          <p>${escapeHtml(field.before || "-")}</p>
+        </div>
+        <div class="diff-panel">
+          <span>현재</span>
+          <p>${escapeHtml(field.after || "-")}</p>
+        </div>
+      </div>
+    </article>
+  `;
 }
 
 function kv(label, value) {
@@ -968,7 +1066,7 @@ function exportCsv() {
 function exportChangesCsv() {
   const headers = [
     "BASELINE_MONTH",
-    "CHANGE_TYPE",
+    "CHANGE_KIND",
     "ITEM_SEQ",
     "ITEM_NAME",
     "ENTP_NAME",
@@ -977,32 +1075,36 @@ function exportChangesCsv() {
     "CLASS_NO_NAME",
     "PERMIT_KIND_CODE_NM",
     "INDUTY_CODE",
-    "DETAIL",
-    "FROM",
-    "TO"
+    "CHANGE_SUMMARY",
+    "FIELD",
+    "BEFORE",
+    "AFTER"
   ];
   const lines = [headers.join(",")];
 
   for (const change of state.filteredChanges) {
-    lines.push(
-      [
-        change.baselineMonth,
-        getChangeTypeLabel(change.type),
-        change.itemSeq,
-        change.itemName,
-        change.entpName,
-        change.itemPermitDate,
-        change.cancelCodeName,
-        change.classNoName,
-        change.permitKind,
-        change.indutyCode,
-        change.detail,
-        change.from,
-        change.to
-      ]
-        .map(csvCell)
-        .join(",")
-    );
+    for (const field of change.fieldChanges || []) {
+      lines.push(
+        [
+          change.baselineMonth,
+          getChangeKindLabel(change.kind),
+          change.itemSeq,
+          change.itemName,
+          change.entpName,
+          change.itemPermitDate,
+          change.cancelCodeName,
+          change.classNoName,
+          change.permitKind,
+          change.indutyCode,
+          change.detail,
+          field.label,
+          field.before,
+          field.after
+        ]
+          .map(csvCell)
+          .join(",")
+      );
+    }
   }
 
   const month = state.selectedBaselineMonth || "baseline";

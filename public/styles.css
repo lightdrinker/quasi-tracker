@@ -502,14 +502,9 @@ tbody tr:hover {
   color: var(--blue);
 }
 
-.change-badge.status {
+.change-badge.changed {
   background: rgba(166, 95, 0, 0.12);
   color: var(--warning);
-}
-
-.change-badge.document {
-  background: rgba(19, 124, 116, 0.12);
-  color: var(--accent-dark);
 }
 
 .change-badge.removed {
@@ -612,6 +607,51 @@ dialog::backdrop {
   white-space: pre-wrap;
 }
 
+.diff-list {
+  display: grid;
+  gap: 12px;
+}
+
+.diff-item {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.diff-item h4 {
+  background: var(--surface-muted);
+  font-size: 13px;
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.diff-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.diff-panel {
+  min-width: 0;
+  padding: 12px;
+}
+
+.diff-panel + .diff-panel {
+  border-left: 1px solid var(--line);
+}
+
+.diff-panel span {
+  color: var(--muted);
+  display: block;
+  font-size: 12px;
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+
+.diff-panel p {
+  max-height: 260px;
+  overflow: auto;
+}
+
 .empty-state {
   color: var(--muted);
   padding: 20px;
@@ -664,6 +704,15 @@ dialog::backdrop {
 
   .detail-grid {
     grid-template-columns: 1fr;
+  }
+
+  .diff-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .diff-panel + .diff-panel {
+    border-left: 0;
+    border-top: 1px solid var(--line);
   }
 }
 
