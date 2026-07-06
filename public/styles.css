@@ -255,6 +255,97 @@ select:focus {
   width: 190px;
 }
 
+.column-panel {
+  background: #fbfcfd;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.column-group {
+  display: grid;
+  gap: 8px;
+}
+
+.column-label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.column-chip-list {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 34px;
+}
+
+.column-chip,
+.column-add {
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: inline-flex;
+  gap: 4px;
+  min-height: 32px;
+}
+
+.column-chip {
+  background: rgba(19, 124, 116, 0.1);
+  border-color: rgba(19, 124, 116, 0.28);
+  color: var(--accent-dark);
+  padding: 3px 5px 3px 9px;
+}
+
+.column-chip span,
+.column-add span {
+  display: block;
+  max-width: 190px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.column-chip button {
+  background: rgba(255, 255, 255, 0.74);
+  border-color: rgba(19, 124, 116, 0.22);
+  border-radius: 5px;
+  color: var(--accent-dark);
+  font-size: 13px;
+  font-weight: 800;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  width: 24px;
+}
+
+.column-chip button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.column-add {
+  background: #fff;
+  color: #23445f;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 0 10px;
+}
+
+.column-add:hover,
+.column-chip button:not(:disabled):hover {
+  border-color: var(--accent);
+  color: var(--accent-dark);
+}
+
+.column-empty {
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .table-wrap {
   overflow: auto;
 }
@@ -262,6 +353,7 @@ select:focus {
 table {
   border-collapse: collapse;
   min-width: 960px;
+  table-layout: fixed;
   width: 100%;
 }
 
@@ -284,6 +376,14 @@ th {
 
 td {
   font-size: 13px;
+}
+
+.truncate-cell {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 tbody tr {

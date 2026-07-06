@@ -3,13 +3,40 @@ const DB_NAME = "quasi-tracker";
 const DB_VERSION = 1;
 const STORE_NAME = "snapshots";
 const MANIFEST_URL = "https://raw.githubusercontent.com/lightdrinker/quasi-tracker/data/manifest.json";
+const COLUMN_STORAGE_KEY = "quasi-tracker-visible-columns";
+
+const COLUMN_DEFINITIONS = [
+  { key: "itemSeq", label: "품목코드", exportLabel: "ITEM_SEQ", defaultVisible: true, width: 130, className: "code-cell" },
+  { key: "itemName", label: "제품명", exportLabel: "ITEM_NAME", defaultVisible: true, width: 230, className: "name-cell" },
+  { key: "entpName", label: "업체명", exportLabel: "ENTP_NAME", defaultVisible: true, width: 190 },
+  { key: "itemPermitDate", label: "허가일", exportLabel: "ITEM_PERMIT_DATE", defaultVisible: true, width: 120, className: "muted-cell" },
+  { key: "cancelCodeName", label: "상태", exportLabel: "CANCEL_CODE_NAME", defaultVisible: true, width: 120, render: renderStatusBadge },
+  { key: "classNoName", label: "분류", exportLabel: "CLASS_NO_NAME", defaultVisible: true, width: 250 },
+  { key: "itemNo", label: "허가번호", exportLabel: "ITEM_NO", width: 130 },
+  { key: "cancelDate", label: "취소/취하일", exportLabel: "CANCEL_DATE", width: 130, className: "muted-cell" },
+  { key: "classNo", label: "분류코드", exportLabel: "CLASS_NO", width: 120 },
+  { key: "permitKind", label: "허가/신고", exportLabel: "PERMIT_KIND_CODE_NM", width: 130 },
+  { key: "indutyCode", label: "제조/수입", exportLabel: "INDUTY_CODE", width: 130 },
+  { key: "manufCountryNames", label: "수입제조국", exportLabel: "MANUF_COUNTRY_NAMES", width: 180 },
+  { key: "mainIngr", label: "주성분", exportLabel: "MAIN_INGR", width: 340 },
+  { key: "aditIngr", label: "첨가제", exportLabel: "ADIT_INGR", width: 340 },
+  { key: "efficacyText", label: "효능효과", exportLabel: "EFFICACY_TEXT", width: 360 },
+  { key: "dosageText", label: "용법용량", exportLabel: "DOSAGE_TEXT", width: 360 },
+  { key: "cautionText", label: "사용상 주의사항", exportLabel: "CAUTION_TEXT", width: 380 },
+  { key: "entpNo", label: "업체번호", exportLabel: "ENTP_NO", width: 130 },
+  { key: "entpSeq", label: "업체일련번호", exportLabel: "ENTP_SEQ", width: 150 },
+  { key: "bizrno", label: "사업자등록번호", exportLabel: "BIZRNO", width: 160 }
+];
+
+const COLUMN_BY_KEY = new Map(COLUMN_DEFINITIONS.map((column) => [column.key, column]));
 
 const state = {
   rows: [],
   filteredRows: [],
   changes: [],
   currentPage: 1,
-  isSyncing: false
+  isSyncing: false,
+  visibleColumnKeys: loadVisibleColumnKeys()
 };
 
 const elements = {};
@@ -43,7 +70,12 @@ function bindElements() {
     "topCompanies",
     "resultCount",
     "sortSelect",
+    "productTable",
+    "tableColumns",
+    "tableHeadRow",
     "productRows",
+    "selectedColumns",
+    "availableColumns",
     "prevPage",
     "nextPage",
     "pageInfo",
@@ -65,6 +97,8 @@ function bindEvents() {
   elements.prevPage.addEventListener("click", () => setPage(state.currentPage - 1));
   elements.nextPage.addEventListener("click", () => setPage(state.currentPage + 1));
   elements.closeDetail.addEventListener("click", () => elements.detailDialog.close());
+  elements.selectedColumns.addEventListener("click", handleColumnAction);
+  elements.availableColumns.addEventListener("click", handleColumnAction);
 
   for (const input of [
     elements.searchInput,
@@ -316,6 +350,7 @@ function sortByPermitDateDesc(a, b) {
 function render() {
   renderMetrics();
   renderTopLists();
+  renderColumnControls();
   renderTable();
   renderChanges();
 }
@@ -361,26 +396,21 @@ function renderTable() {
   state.currentPage = Math.min(state.currentPage, totalPages);
   const start = (state.currentPage - 1) * TABLE_PAGE_SIZE;
   const pageRows = state.filteredRows.slice(start, start + TABLE_PAGE_SIZE);
+  const visibleColumns = getVisibleColumns();
 
+  renderTableHead(visibleColumns);
   elements.resultCount.textContent = `${state.filteredRows.length.toLocaleString()} results`;
   elements.productRows.innerHTML = "";
 
   if (!pageRows.length) {
     const row = document.createElement("tr");
-    row.innerHTML = `<td colspan="6" class="empty-state">No products match the current filters.</td>`;
+    row.innerHTML = `<td colspan="${visibleColumns.length}" class="empty-state">No products match the current filters.</td>`;
     elements.productRows.append(row);
   }
 
   for (const item of pageRows) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td class="code-cell">${escapeHtml(item.itemSeq)}</td>
-      <td class="name-cell">${escapeHtml(item.itemName)}</td>
-      <td>${escapeHtml(item.entpName)}</td>
-      <td class="muted-cell">${escapeHtml(item.itemPermitDate || "-")}</td>
-      <td>${renderStatusBadge(item.cancelCodeName)}</td>
-      <td>${escapeHtml(item.classNoName || "-")}</td>
-    `;
+    tr.innerHTML = visibleColumns.map((column) => renderTableCell(item, column)).join("");
     tr.addEventListener("click", () => openDetail(item));
     elements.productRows.append(tr);
   }
@@ -390,9 +420,128 @@ function renderTable() {
   elements.nextPage.disabled = state.currentPage >= totalPages;
 }
 
+function renderTableHead(visibleColumns) {
+  const tableWidth = Math.max(960, visibleColumns.reduce((sum, column) => sum + column.width, 0));
+  elements.productTable.style.minWidth = `${tableWidth}px`;
+  elements.tableColumns.innerHTML = visibleColumns
+    .map((column) => `<col style="width: ${column.width}px">`)
+    .join("");
+  elements.tableHeadRow.innerHTML = visibleColumns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join("");
+}
+
+function renderTableCell(item, column) {
+  const value = getColumnValue(item, column);
+  const displayValue = value || "-";
+  const className = column.className ? ` class="${column.className}"` : "";
+  const title = ` title="${escapeHtml(displayValue)}"`;
+
+  if (column.render) {
+    return `<td${className}${title}>${column.render(value, item)}</td>`;
+  }
+
+  return `<td${className}><span class="truncate-cell"${title}>${escapeHtml(displayValue)}</span></td>`;
+}
+
 function renderStatusBadge(status) {
   const type = status === "정상" ? "normal" : "inactive";
   return `<span class="badge ${type}">${escapeHtml(status || "미기재")}</span>`;
+}
+
+function renderColumnControls() {
+  const visibleColumns = getVisibleColumns();
+  const visibleKeys = new Set(visibleColumns.map((column) => column.key));
+  const availableColumns = COLUMN_DEFINITIONS.filter((column) => !visibleKeys.has(column.key));
+
+  elements.selectedColumns.innerHTML = "";
+  visibleColumns.forEach((column, index) => {
+    const chip = document.createElement("div");
+    chip.className = "column-chip";
+    chip.innerHTML = `
+      <span title="${escapeHtml(column.label)}">${escapeHtml(column.label)}</span>
+      <button type="button" data-column-action="left" data-column-key="${escapeHtml(column.key)}" aria-label="${escapeHtml(column.label)} 왼쪽으로 이동"${index === 0 ? " disabled" : ""}>‹</button>
+      <button type="button" data-column-action="right" data-column-key="${escapeHtml(column.key)}" aria-label="${escapeHtml(column.label)} 오른쪽으로 이동"${index === visibleColumns.length - 1 ? " disabled" : ""}>›</button>
+      <button type="button" data-column-action="remove" data-column-key="${escapeHtml(column.key)}" aria-label="${escapeHtml(column.label)} 숨기기"${visibleColumns.length === 1 ? " disabled" : ""}>×</button>
+    `;
+    elements.selectedColumns.append(chip);
+  });
+
+  elements.availableColumns.innerHTML = "";
+  if (!availableColumns.length) {
+    const empty = document.createElement("span");
+    empty.className = "column-empty";
+    empty.textContent = "추가 가능한 컬럼 없음";
+    elements.availableColumns.append(empty);
+    return;
+  }
+
+  for (const column of availableColumns) {
+    const button = document.createElement("button");
+    button.className = "column-add";
+    button.type = "button";
+    button.dataset.columnAction = "add";
+    button.dataset.columnKey = column.key;
+    button.innerHTML = `<span>+ ${escapeHtml(column.label)}</span>`;
+    elements.availableColumns.append(button);
+  }
+}
+
+function handleColumnAction(event) {
+  const button = event.target.closest("button[data-column-action]");
+  if (!button) {
+    return;
+  }
+
+  const key = button.dataset.columnKey;
+  const action = button.dataset.columnAction;
+
+  if (!COLUMN_BY_KEY.has(key)) {
+    return;
+  }
+
+  if (action === "add") {
+    addColumn(key);
+  } else if (action === "remove") {
+    removeColumn(key);
+  } else if (action === "left") {
+    moveColumn(key, -1);
+  } else if (action === "right") {
+    moveColumn(key, 1);
+  }
+}
+
+function addColumn(key) {
+  if (state.visibleColumnKeys.includes(key)) {
+    return;
+  }
+  state.visibleColumnKeys = [...state.visibleColumnKeys, key];
+  persistColumnSelection();
+}
+
+function removeColumn(key) {
+  if (state.visibleColumnKeys.length <= 1) {
+    return;
+  }
+  state.visibleColumnKeys = state.visibleColumnKeys.filter((columnKey) => columnKey !== key);
+  persistColumnSelection();
+}
+
+function moveColumn(key, direction) {
+  const index = state.visibleColumnKeys.indexOf(key);
+  const nextIndex = index + direction;
+  if (index < 0 || nextIndex < 0 || nextIndex >= state.visibleColumnKeys.length) {
+    return;
+  }
+
+  const nextKeys = [...state.visibleColumnKeys];
+  [nextKeys[index], nextKeys[nextIndex]] = [nextKeys[nextIndex], nextKeys[index]];
+  state.visibleColumnKeys = nextKeys;
+  persistColumnSelection();
+}
+
+function persistColumnSelection() {
+  saveVisibleColumnKeys();
+  renderColumnControls();
+  renderTable();
 }
 
 function renderChanges() {
@@ -477,37 +626,12 @@ function resetFilters() {
 }
 
 function exportCsv() {
-  const headers = [
-    "ITEM_SEQ",
-    "ITEM_NAME",
-    "ENTP_NAME",
-    "ITEM_PERMIT_DATE",
-    "CANCEL_CODE_NAME",
-    "CLASS_NO_NAME",
-    "PERMIT_KIND_CODE_NM",
-    "INDUTY_CODE",
-    "MAIN_INGR",
-    "ADIT_INGR"
-  ];
+  const columns = getVisibleColumns();
+  const headers = columns.map((column) => column.exportLabel || column.label);
   const lines = [headers.join(",")];
 
   for (const row of state.filteredRows) {
-    lines.push(
-      [
-        row.itemSeq,
-        row.itemName,
-        row.entpName,
-        row.itemPermitDate,
-        row.cancelCodeName,
-        row.classNoName,
-        row.permitKind,
-        row.indutyCode,
-        row.mainIngr,
-        row.aditIngr
-      ]
-        .map(csvCell)
-        .join(",")
-    );
+    lines.push(columns.map((column) => csvCell(getColumnValue(row, column))).join(","));
   }
 
   const blob = new Blob([`\uFEFF${lines.join("\n")}`], { type: "text/csv;charset=utf-8" });
@@ -545,7 +669,52 @@ function setStatus(message) {
 }
 
 function renderEmpty(message) {
-  elements.productRows.innerHTML = `<tr><td colspan="6" class="empty-state">${escapeHtml(message)}</td></tr>`;
+  const visibleColumns = getVisibleColumns();
+  renderColumnControls();
+  renderTableHead(visibleColumns);
+  elements.productRows.innerHTML = `<tr><td colspan="${visibleColumns.length}" class="empty-state">${escapeHtml(message)}</td></tr>`;
+}
+
+function getVisibleColumns() {
+  const columns = state.visibleColumnKeys.map((key) => COLUMN_BY_KEY.get(key)).filter(Boolean);
+  if (columns.length) {
+    return columns;
+  }
+  state.visibleColumnKeys = getDefaultColumnKeys();
+  return state.visibleColumnKeys.map((key) => COLUMN_BY_KEY.get(key));
+}
+
+function getColumnValue(row, column) {
+  return row[column.key] || "";
+}
+
+function getDefaultColumnKeys() {
+  return COLUMN_DEFINITIONS.filter((column) => column.defaultVisible).map((column) => column.key);
+}
+
+function loadVisibleColumnKeys() {
+  try {
+    const rawValue = localStorage.getItem(COLUMN_STORAGE_KEY);
+    const parsed = rawValue ? JSON.parse(rawValue) : null;
+    if (Array.isArray(parsed)) {
+      const validKeys = parsed.filter((key) => COLUMN_BY_KEY.has(key));
+      if (validKeys.length) {
+        return validKeys;
+      }
+    }
+  } catch (error) {
+    console.warn("Unable to read saved columns", error);
+  }
+
+  return getDefaultColumnKeys();
+}
+
+function saveVisibleColumnKeys() {
+  try {
+    localStorage.setItem(COLUMN_STORAGE_KEY, JSON.stringify(state.visibleColumnKeys));
+  } catch (error) {
+    console.warn("Unable to save columns", error);
+  }
 }
 
 function escapeHtml(value) {

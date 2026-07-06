@@ -119,17 +119,22 @@
               </div>
             </div>
 
+            <div class="column-panel" aria-label="table columns">
+              <div class="column-group">
+                <div class="column-label">확정 컬럼</div>
+                <div id="selectedColumns" class="column-chip-list"></div>
+              </div>
+              <div class="column-group">
+                <div class="column-label">선택 컬럼</div>
+                <div id="availableColumns" class="column-chip-list"></div>
+              </div>
+            </div>
+
             <div class="table-wrap">
-              <table>
+              <table id="productTable">
+                <colgroup id="tableColumns"></colgroup>
                 <thead>
-                  <tr>
-                    <th>품목코드</th>
-                    <th>제품명</th>
-                    <th>업체명</th>
-                    <th>허가일</th>
-                    <th>상태</th>
-                    <th>분류</th>
-                  </tr>
+                  <tr id="tableHeadRow"></tr>
                 </thead>
                 <tbody id="productRows"></tbody>
               </table>
