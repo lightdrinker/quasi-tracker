@@ -448,27 +448,73 @@ tbody tr:hover {
   padding: 16px;
 }
 
-.change-list {
-  display: grid;
-  gap: 8px;
-  margin-top: 10px;
+.changes-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 14px;
 }
 
-.change-item {
-  background: var(--surface-muted);
-  border-radius: 6px;
-  padding: 10px 12px;
-}
-
-.change-item strong {
-  display: block;
-  font-size: 13px;
-  margin-bottom: 4px;
-}
-
-.change-item span {
+.changes-header p {
   color: var(--muted);
+  font-size: 13px;
+  margin: 4px 0 0;
+}
+
+.change-controls {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(6, minmax(120px, 1fr));
+  margin-bottom: 12px;
+}
+
+.change-controls .field {
+  margin-bottom: 0;
+}
+
+.change-search-field {
+  grid-column: span 2;
+}
+
+.change-table-wrap {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: auto;
+}
+
+.change-table {
+  min-width: 1180px;
+}
+
+.change-badge {
+  border-radius: 999px;
+  display: inline-block;
   font-size: 12px;
+  font-weight: 800;
+  padding: 4px 9px;
+  white-space: nowrap;
+}
+
+.change-badge.new,
+.change-badge.new-snapshot {
+  background: rgba(47, 95, 152, 0.12);
+  color: var(--blue);
+}
+
+.change-badge.status {
+  background: rgba(166, 95, 0, 0.12);
+  color: var(--warning);
+}
+
+.change-badge.document {
+  background: rgba(19, 124, 116, 0.12);
+  color: var(--accent-dark);
+}
+
+.change-badge.removed {
+  background: rgba(180, 35, 24, 0.1);
+  color: var(--danger);
 }
 
 dialog {
@@ -603,6 +649,19 @@ dialog::backdrop {
     width: 100%;
   }
 
+  .changes-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .change-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .change-search-field {
+    grid-column: span 2;
+  }
+
   .detail-grid {
     grid-template-columns: 1fr;
   }
@@ -615,5 +674,13 @@ dialog::backdrop {
 
   .field.split {
     grid-template-columns: 1fr;
+  }
+
+  .change-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .change-search-field {
+    grid-column: auto;
   }
 }

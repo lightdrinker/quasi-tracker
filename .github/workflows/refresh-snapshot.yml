@@ -26,6 +26,8 @@ jobs:
         env:
           QDRG_PROXY_BASE_URL: https://quasi-tracker.vercel.app/api/qdrg
           PREVIOUS_SNAPSHOT_URL: https://raw.githubusercontent.com/lightdrinker/quasi-tracker/data/snapshot.json
+          PREVIOUS_MANIFEST_URL: https://raw.githubusercontent.com/lightdrinker/quasi-tracker/data/manifest.json
+          BASELINE_RETENTION_MONTHS: 12
           SNAPSHOT_OUT_DIR: snapshot-out
         run: node scripts/build-snapshot.mjs
 
@@ -39,6 +41,7 @@ jobs:
           git rm -rf . >/dev/null 2>&1 || true
           cp ../snapshot-out/snapshot.json ./snapshot.json
           cp ../snapshot-out/manifest.json ./manifest.json
-          git add snapshot.json manifest.json
+          cp -R ../snapshot-out/baselines ./baselines
+          git add snapshot.json manifest.json baselines
           git commit -m "Refresh quasi snapshot"
           git push origin HEAD:data --force

@@ -10,6 +10,8 @@ const OUT_DIR = process.env.SNAPSHOT_OUT_DIR || "snapshot-out";
 const PROXY_BASE_URL = process.env.QDRG_PROXY_BASE_URL || "";
 const SERVICE_KEY = process.env.QDRG_SERVICE_KEY || process.env.QDRG_API_KEY || "";
 const PREVIOUS_SNAPSHOT_URL = process.env.PREVIOUS_SNAPSHOT_URL || "";
+const PREVIOUS_MANIFEST_URL = process.env.PREVIOUS_MANIFEST_URL || "";
+const BASELINE_RETENTION_MONTHS = Math.max(1, Number(process.env.BASELINE_RETENTION_MONTHS || 12) || 12);
 
 async function main() {
   const startedAt = new Date();
@@ -26,12 +28,22 @@ async function main() {
 
   rows.sort(sortByPermitDateDesc);
 
-  const previousSnapshot = await fetchPreviousSnapshot();
-  const changes = detectChanges(previousSnapshot?.rows || [], rows);
   const rowsHash = hashJson(rows);
   const syncedAt = new Date().toISOString();
+  const previousSnapshot = await fetchPreviousSnapshot();
+  const previousManifest = await fetchPreviousManifest();
+  const baselines = await buildBaselines({
+    previousManifest,
+    rows,
+    rowsHash,
+    syncedAt,
+    totalCount
+  });
+  const currentBaselineMonth = getKstMonth(new Date(syncedAt));
+  const currentBaseline = baselines.find((baseline) => baseline.month === currentBaselineMonth);
+  const changes = detectChanges(currentBaseline?.rows || previousSnapshot?.rows || [], rows, currentBaselineMonth);
   const snapshot = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     syncedAt,
     generatedInSeconds: Number(((Date.now() - startedAt.getTime()) / 1000).toFixed(2)),
     totalCount,
@@ -40,17 +52,37 @@ async function main() {
     changes
   };
   const manifest = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     syncedAt,
     totalCount,
     rowsHash,
     changeCount: changes.length,
-    snapshotUrl: "snapshot.json"
+    snapshotUrl: "snapshot.json",
+    currentBaselineMonth,
+    baselineRetentionMonths: BASELINE_RETENTION_MONTHS,
+    baselines: baselines.map(({ rows: _rows, ...baseline }) => baseline)
   };
 
   await fs.mkdir(OUT_DIR, { recursive: true });
+  await fs.mkdir(path.join(OUT_DIR, "baselines"), { recursive: true });
   await fs.writeFile(path.join(OUT_DIR, "snapshot.json"), `${JSON.stringify(snapshot)}\n`, "utf8");
   await fs.writeFile(path.join(OUT_DIR, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  for (const baseline of baselines) {
+    const baselineSnapshot = {
+      schemaVersion: 3,
+      type: "monthly-baseline",
+      month: baseline.month,
+      syncedAt: baseline.syncedAt,
+      totalCount: baseline.totalCount,
+      rowsHash: baseline.rowsHash,
+      rows: baseline.rows
+    };
+    await fs.writeFile(
+      path.join(OUT_DIR, "baselines", `${baseline.month}.json`),
+      `${JSON.stringify(baselineSnapshot)}\n`,
+      "utf8"
+    );
+  }
 
   console.log(
     JSON.stringify(
@@ -59,6 +91,7 @@ async function main() {
         rows: rows.length,
         totalPages,
         changes: changes.length,
+        baselines: baselines.map((baseline) => baseline.month),
         rowsHash,
         outDir: OUT_DIR
       },
@@ -199,26 +232,124 @@ async function fetchPreviousSnapshot() {
   }
 }
 
-function detectChanges(previousRows, nextRows) {
+async function fetchPreviousManifest() {
+  if (!PREVIOUS_MANIFEST_URL) {
+    return null;
+  }
+
+  try {
+    const url = new URL(PREVIOUS_MANIFEST_URL);
+    url.searchParams.set("t", String(Date.now()));
+    const response = await fetch(url);
+    if (!response.ok) {
+      return null;
+    }
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+async function buildBaselines({ previousManifest, rows, rowsHash, syncedAt, totalCount }) {
+  const currentMonth = getKstMonth(new Date(syncedAt));
+  const retainedMonths = getRecentMonths(currentMonth, BASELINE_RETENTION_MONTHS);
+  const retainedMonthSet = new Set(retainedMonths);
+  const baselineByMonth = new Map();
+
+  for (const baseline of previousManifest?.baselines || []) {
+    if (!retainedMonthSet.has(baseline.month) || baselineByMonth.has(baseline.month)) {
+      continue;
+    }
+    const previousBaseline = await fetchPreviousBaseline(baseline);
+    baselineByMonth.set(baseline.month, {
+      month: baseline.month,
+      syncedAt: previousBaseline.syncedAt || baseline.syncedAt || syncedAt,
+      totalCount: previousBaseline.totalCount || baseline.totalCount || previousBaseline.rows?.length || 0,
+      rowsHash: previousBaseline.rowsHash || baseline.rowsHash || hashJson(previousBaseline.rows || []),
+      url: baselineUrl(baseline.month),
+      rows: previousBaseline.rows || []
+    });
+  }
+
+  if (!baselineByMonth.has(currentMonth)) {
+    baselineByMonth.set(currentMonth, {
+      month: currentMonth,
+      syncedAt,
+      totalCount,
+      rowsHash,
+      url: baselineUrl(currentMonth),
+      rows
+    });
+  }
+
+  return retainedMonths.filter((month) => baselineByMonth.has(month)).map((month) => baselineByMonth.get(month));
+}
+
+async function fetchPreviousBaseline(baseline) {
+  if (!PREVIOUS_MANIFEST_URL) {
+    throw new Error(`Cannot fetch baseline ${baseline.month}: PREVIOUS_MANIFEST_URL is not set.`);
+  }
+
+  const url = new URL(baseline.url || baselineUrl(baseline.month), PREVIOUS_MANIFEST_URL);
+  url.searchParams.set("v", baseline.rowsHash || String(Date.now()));
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Baseline ${baseline.month} failed with HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+function baselineUrl(month) {
+  return `baselines/${month}.json`;
+}
+
+function getKstMonth(date) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    month: "2-digit",
+    timeZone: "Asia/Seoul",
+    year: "numeric"
+  }).formatToParts(date);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  return `${year}-${month}`;
+}
+
+function getRecentMonths(currentMonth, count) {
+  const [year, month] = currentMonth.split("-").map(Number);
+  return Array.from({ length: count }, (_, index) => {
+    const date = new Date(Date.UTC(year, month - 1 - index, 1));
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+  });
+}
+
+function detectChanges(previousRows, nextRows, baselineMonth = "") {
   if (!previousRows.length) {
     return nextRows.slice(0, 20).map((row) => ({
+      baselineMonth,
       type: "new snapshot",
       itemSeq: row.itemSeq,
       itemName: row.itemName,
+      entpName: row.entpName,
+      itemPermitDate: row.itemPermitDate,
+      classNoName: row.classNoName,
+      permitKind: row.permitKind,
+      indutyCode: row.indutyCode,
+      cancelCodeName: row.cancelCodeName,
       detail: `${row.entpName} · ${row.classNoName}`
     }));
   }
 
   const previous = new Map(previousRows.map((row) => [row.itemSeq, row]));
+  const next = new Map(nextRows.map((row) => [row.itemSeq, row]));
   const changes = [];
 
   for (const row of nextRows) {
     const old = previous.get(row.itemSeq);
     if (!old) {
       changes.push({
+        ...changeMeta(row, baselineMonth),
         type: "new",
-        itemSeq: row.itemSeq,
-        itemName: row.itemName,
         detail: `${row.itemPermitDate} · ${row.entpName}`
       });
       continue;
@@ -226,19 +357,31 @@ function detectChanges(previousRows, nextRows) {
 
     if (old.cancelCodeName !== row.cancelCodeName) {
       changes.push({
+        ...changeMeta(row, baselineMonth),
         type: "status",
-        itemSeq: row.itemSeq,
-        itemName: row.itemName,
+        from: old.cancelCodeName || "-",
+        to: row.cancelCodeName || "-",
         detail: `${old.cancelCodeName || "-"} -> ${row.cancelCodeName || "-"}`
       });
     }
 
-    if (docFingerprint(old) !== docFingerprint(row)) {
+    const changedFields = changedDocumentFields(old, row);
+    if (changedFields.length) {
       changes.push({
+        ...changeMeta(row, baselineMonth),
         type: "document",
-        itemSeq: row.itemSeq,
-        itemName: row.itemName,
-        detail: "효능효과/용법용량/주의사항 문서 변경"
+        changedFields,
+        detail: `${changedFields.join("/")} 변경`
+      });
+    }
+  }
+
+  for (const old of previousRows) {
+    if (!next.has(old.itemSeq)) {
+      changes.push({
+        ...changeMeta(old, baselineMonth),
+        type: "removed",
+        detail: "기준월 이후 최신 DB에서 제외"
       });
     }
   }
@@ -246,8 +389,27 @@ function detectChanges(previousRows, nextRows) {
   return changes;
 }
 
-function docFingerprint(row) {
-  return [row.efficacyText, row.dosageText, row.cautionText].join("|");
+function changeMeta(row, baselineMonth) {
+  return {
+    baselineMonth,
+    itemSeq: row.itemSeq,
+    itemName: row.itemName,
+    entpName: row.entpName,
+    itemPermitDate: row.itemPermitDate,
+    classNoName: row.classNoName,
+    permitKind: row.permitKind,
+    indutyCode: row.indutyCode,
+    cancelCodeName: row.cancelCodeName
+  };
+}
+
+function changedDocumentFields(oldRow, nextRow) {
+  const fields = [
+    ["efficacyText", "효능효과"],
+    ["dosageText", "용법용량"],
+    ["cautionText", "주의사항"]
+  ];
+  return fields.filter(([key]) => oldRow[key] !== nextRow[key]).map(([, label]) => label);
 }
 
 function hashJson(value) {

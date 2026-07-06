@@ -5,6 +5,14 @@ const STORE_NAME = "snapshots";
 const MANIFEST_URL = "https://raw.githubusercontent.com/lightdrinker/quasi-tracker/data/manifest.json";
 const COLUMN_STORAGE_KEY = "quasi-tracker-visible-columns";
 
+const CHANGE_TYPE_LABELS = {
+  new: "신규",
+  status: "상태변경",
+  document: "문서변경",
+  removed: "삭제",
+  "new snapshot": "신규"
+};
+
 const COLUMN_DEFINITIONS = [
   { key: "itemSeq", label: "품목코드", exportLabel: "ITEM_SEQ", defaultVisible: true, width: 130, className: "code-cell" },
   { key: "itemName", label: "제품명", exportLabel: "ITEM_NAME", defaultVisible: true, width: 230, className: "name-cell" },
@@ -31,11 +39,19 @@ const COLUMN_DEFINITIONS = [
 const COLUMN_BY_KEY = new Map(COLUMN_DEFINITIONS.map((column) => [column.key, column]));
 
 const state = {
+  manifest: null,
   rows: [],
   filteredRows: [],
+  baselines: [],
+  baselineRows: [],
+  baselineCache: new Map(),
+  baselineError: "",
+  selectedBaselineMonth: "",
   changes: [],
+  filteredChanges: [],
   currentPage: 1,
   isSyncing: false,
+  isLoadingBaseline: false,
   visibleColumnKeys: loadVisibleColumnKeys()
 };
 
@@ -79,7 +95,16 @@ function bindElements() {
     "prevPage",
     "nextPage",
     "pageInfo",
-    "changeList",
+    "baselineSelect",
+    "changeTypeFilter",
+    "changeClassFilter",
+    "changeStatusFilter",
+    "changePermitFilter",
+    "changeIndutyFilter",
+    "changeSearchInput",
+    "changeSummary",
+    "exportChangesButton",
+    "changeRows",
     "detailDialog",
     "detailCode",
     "detailTitle",
@@ -99,6 +124,11 @@ function bindEvents() {
   elements.closeDetail.addEventListener("click", () => elements.detailDialog.close());
   elements.selectedColumns.addEventListener("click", handleColumnAction);
   elements.availableColumns.addEventListener("click", handleColumnAction);
+  elements.baselineSelect.addEventListener("change", async () => {
+    state.selectedBaselineMonth = elements.baselineSelect.value;
+    await loadSelectedBaseline();
+  });
+  elements.exportChangesButton.addEventListener("click", exportChangesCsv);
 
   for (const input of [
     elements.searchInput,
@@ -116,6 +146,17 @@ function bindEvents() {
       applyFilters();
     });
   }
+
+  for (const input of [
+    elements.changeTypeFilter,
+    elements.changeClassFilter,
+    elements.changeStatusFilter,
+    elements.changePermitFilter,
+    elements.changeIndutyFilter,
+    elements.changeSearchInput
+  ]) {
+    input.addEventListener("input", applyChangeFilters);
+  }
 }
 
 async function loadSnapshot() {
@@ -124,10 +165,12 @@ async function loadSnapshot() {
 
   if (snapshot && Array.isArray(snapshot.rows)) {
     state.rows = snapshot.rows;
-    state.changes = snapshot.changes || [];
+    state.baselines = normalizeBaselines(snapshot.baselines || []);
     setStatus(`Cached snapshot ${formatDateTime(snapshot.syncedAt)}`);
     hydrateFilters();
+    hydrateBaselineSelect();
     applyFilters();
+    await loadSelectedBaseline();
   }
 
   await syncAll({ force: false });
@@ -145,8 +188,17 @@ async function syncAll({ force }) {
     setStatus("Checking central snapshot");
     const localSnapshot = await readSnapshot();
     const manifest = await fetchManifest();
+    state.manifest = manifest;
+    state.baselines = normalizeBaselines(manifest.baselines || []);
+    hydrateBaselineSelect();
 
     if (!force && localSnapshot && localSnapshot.rowsHash === manifest.rowsHash) {
+      if (!state.rows.length && Array.isArray(localSnapshot.rows)) {
+        state.rows = localSnapshot.rows;
+        hydrateFilters();
+        applyFilters();
+      }
+      await loadSelectedBaseline();
       setStatus(`Latest central snapshot ${formatDateTime(manifest.syncedAt)}`);
       return;
     }
@@ -159,15 +211,15 @@ async function syncAll({ force }) {
       totalCount: centralSnapshot.totalCount || manifest.totalCount || normalizedRows.length,
       rowsHash: centralSnapshot.rowsHash || manifest.rowsHash,
       rows: normalizedRows,
-      changes: centralSnapshot.changes || []
+      baselines: state.baselines
     };
 
     await writeSnapshot(snapshot);
     state.rows = normalizedRows;
-    state.changes = snapshot.changes;
     hydrateFilters();
     state.currentPage = 1;
     applyFilters();
+    await loadSelectedBaseline();
     setStatus(`Loaded central snapshot ${formatDateTime(snapshot.syncedAt)}`);
   } catch (error) {
     setStatus(`Snapshot sync failed: ${error.message}`);
@@ -200,6 +252,93 @@ async function fetchCentralSnapshot(manifest) {
   }
 
   return response.json();
+}
+
+function normalizeBaselines(baselines) {
+  return baselines
+    .filter((baseline) => baseline && baseline.month && baseline.url)
+    .sort((a, b) => b.month.localeCompare(a.month));
+}
+
+function hydrateBaselineSelect() {
+  const current = state.selectedBaselineMonth || elements.baselineSelect.value;
+  elements.baselineSelect.innerHTML = "";
+
+  if (!state.baselines.length) {
+    elements.baselineSelect.append(new Option("No baseline data", ""));
+    elements.baselineSelect.disabled = true;
+    state.selectedBaselineMonth = "";
+    return;
+  }
+
+  elements.baselineSelect.disabled = false;
+  for (const baseline of state.baselines) {
+    const label = `${baseline.month} 기준 (${formatDateTime(baseline.syncedAt)})`;
+    elements.baselineSelect.append(new Option(label, baseline.month));
+  }
+
+  state.selectedBaselineMonth = state.baselines.some((baseline) => baseline.month === current)
+    ? current
+    : state.baselines[0].month;
+  elements.baselineSelect.value = state.selectedBaselineMonth;
+}
+
+async function loadSelectedBaseline() {
+  if (!state.rows.length || !state.baselines.length || !state.selectedBaselineMonth) {
+    state.baselineRows = [];
+    state.changes = [];
+    state.filteredChanges = [];
+    hydrateChangeFilters();
+    renderMetrics();
+    renderChanges();
+    return;
+  }
+
+  const baseline = state.baselines.find((entry) => entry.month === state.selectedBaselineMonth) || state.baselines[0];
+  state.selectedBaselineMonth = baseline.month;
+  elements.baselineSelect.value = baseline.month;
+  state.baselineError = "";
+  state.changes = [];
+  state.filteredChanges = [];
+  state.isLoadingBaseline = true;
+  renderMetrics();
+  renderChanges();
+
+  try {
+    state.baselineRows = await fetchBaselineRows(baseline);
+    state.changes = detectChanges(state.baselineRows, state.rows, baseline.month);
+    hydrateChangeFilters();
+    applyChangeFilters();
+  } catch (error) {
+    state.baselineRows = [];
+    state.changes = [];
+    state.filteredChanges = [];
+    state.baselineError = error.message;
+    hydrateChangeFilters();
+    renderMetrics();
+    renderChanges();
+  } finally {
+    state.isLoadingBaseline = false;
+    renderChanges();
+  }
+}
+
+async function fetchBaselineRows(baseline) {
+  if (state.baselineCache.has(baseline.month)) {
+    return state.baselineCache.get(baseline.month);
+  }
+
+  const baselineUrl = new URL(baseline.url, MANIFEST_URL);
+  baselineUrl.searchParams.set("v", baseline.rowsHash || String(Date.now()));
+  const response = await fetch(baselineUrl, { cache: "reload" });
+  if (!response.ok) {
+    throw new Error(`Baseline request failed with ${response.status}`);
+  }
+
+  const payload = await response.json();
+  const rows = (payload.rows || []).map(normalizeSnapshotRow).sort(sortByPermitDateDesc);
+  state.baselineCache.set(baseline.month, rows);
+  return rows;
 }
 
 function normalizeSnapshotRow(item) {
@@ -249,6 +388,21 @@ function hydrateFilters() {
   setOptions(elements.indutyFilter, "All", uniqueSorted(state.rows.map((row) => row.indutyCode)));
 }
 
+function hydrateChangeFilters() {
+  const currentType = elements.changeTypeFilter.value;
+  elements.changeTypeFilter.innerHTML = "";
+  elements.changeTypeFilter.append(new Option("All changes", ""));
+  for (const type of uniqueSorted(state.changes.map((change) => change.type))) {
+    elements.changeTypeFilter.append(new Option(getChangeTypeLabel(type), type));
+  }
+  elements.changeTypeFilter.value = state.changes.some((change) => change.type === currentType) ? currentType : "";
+
+  setOptions(elements.changeClassFilter, "All categories", uniqueSorted(state.changes.map((change) => change.classNoName)));
+  setOptions(elements.changeStatusFilter, "All status", uniqueSorted(state.changes.map((change) => change.cancelCodeName)));
+  setOptions(elements.changePermitFilter, "All", uniqueSorted(state.changes.map((change) => change.permitKind)));
+  setOptions(elements.changeIndutyFilter, "All", uniqueSorted(state.changes.map((change) => change.indutyCode)));
+}
+
 function setOptions(select, label, values) {
   const current = select.value;
   select.innerHTML = "";
@@ -263,6 +417,40 @@ function setOptions(select, label, values) {
 
 function uniqueSorted(values) {
   return [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b, "ko"));
+}
+
+function applyChangeFilters() {
+  const type = elements.changeTypeFilter.value;
+  const className = elements.changeClassFilter.value;
+  const status = elements.changeStatusFilter.value;
+  const permit = elements.changePermitFilter.value;
+  const induty = elements.changeIndutyFilter.value;
+  const query = elements.changeSearchInput.value.trim().toLowerCase();
+
+  state.filteredChanges = state.changes.filter((change) => {
+    if (type && change.type !== type) {
+      return false;
+    }
+    if (className && change.classNoName !== className) {
+      return false;
+    }
+    if (status && change.cancelCodeName !== status) {
+      return false;
+    }
+    if (permit && change.permitKind !== permit) {
+      return false;
+    }
+    if (induty && change.indutyCode !== induty) {
+      return false;
+    }
+    if (query && !getChangeSearchText(change).includes(query)) {
+      return false;
+    }
+    return true;
+  });
+
+  renderMetrics();
+  renderChanges();
 }
 
 function applyFilters() {
@@ -545,23 +733,157 @@ function persistColumnSelection() {
 }
 
 function renderChanges() {
-  elements.changeList.innerHTML = "";
-  const changes = state.changes.slice(0, 12);
+  elements.changeRows.innerHTML = "";
+  elements.exportChangesButton.disabled = !state.filteredChanges.length;
 
-  if (!changes.length) {
-    elements.changeList.innerHTML = `<div class="empty-state">No snapshot changes detected yet.</div>`;
+  if (state.isLoadingBaseline) {
+    elements.changeSummary.textContent = "기준월 데이터를 불러오는 중";
+    elements.changeRows.innerHTML = `<tr><td colspan="8" class="empty-state">Loading baseline comparison.</td></tr>`;
     return;
   }
 
-  for (const change of changes) {
-    const item = document.createElement("div");
-    item.className = "change-item";
-    item.innerHTML = `
-      <strong>${escapeHtml(change.itemName || change.itemSeq)} · ${escapeHtml(change.type)}</strong>
-      <span>${escapeHtml(change.detail || "")}</span>
-    `;
-    elements.changeList.append(item);
+  if (!state.baselines.length) {
+    elements.changeSummary.textContent = "아직 저장된 기준월 DB가 없습니다.";
+    elements.changeRows.innerHTML = `<tr><td colspan="8" class="empty-state">다음 스냅샷 갱신 후 기준월 DB가 생성됩니다.</td></tr>`;
+    return;
   }
+
+  if (state.baselineError) {
+    elements.changeSummary.textContent = `기준월 데이터를 불러오지 못했습니다: ${state.baselineError}`;
+    elements.changeRows.innerHTML = `<tr><td colspan="8" class="empty-state">Baseline comparison is unavailable.</td></tr>`;
+    return;
+  }
+
+  const baseline = state.baselines.find((entry) => entry.month === state.selectedBaselineMonth);
+  const baselineLabel = baseline ? `${baseline.month} 기준` : "선택한 기준월";
+  const filteredCount = state.filteredChanges.length;
+  const totalCount = state.changes.length;
+  elements.changeSummary.textContent = `${baselineLabel} 대비 ${filteredCount.toLocaleString()} / ${totalCount.toLocaleString()} changes`;
+
+  if (!state.filteredChanges.length) {
+    elements.changeRows.innerHTML = `<tr><td colspan="8" class="empty-state">No changes match the current filters.</td></tr>`;
+    return;
+  }
+
+  for (const change of state.filteredChanges) {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${renderChangeBadge(change.type)}</td>
+      <td class="code-cell"><span class="truncate-cell" title="${escapeHtml(change.itemSeq || "-")}">${escapeHtml(change.itemSeq || "-")}</span></td>
+      <td class="name-cell"><span class="truncate-cell" title="${escapeHtml(change.itemName || "-")}">${escapeHtml(change.itemName || "-")}</span></td>
+      <td><span class="truncate-cell" title="${escapeHtml(change.entpName || "-")}">${escapeHtml(change.entpName || "-")}</span></td>
+      <td><span class="truncate-cell" title="${escapeHtml(change.classNoName || "-")}">${escapeHtml(change.classNoName || "-")}</span></td>
+      <td class="muted-cell"><span class="truncate-cell" title="${escapeHtml(change.itemPermitDate || "-")}">${escapeHtml(change.itemPermitDate || "-")}</span></td>
+      <td><span class="truncate-cell" title="${escapeHtml(change.cancelCodeName || "-")}">${escapeHtml(change.cancelCodeName || "-")}</span></td>
+      <td><span class="truncate-cell" title="${escapeHtml(change.detail || "-")}">${escapeHtml(change.detail || "-")}</span></td>
+    `;
+    row.addEventListener("click", () => {
+      const currentItem = state.rows.find((item) => item.itemSeq === change.itemSeq);
+      if (currentItem) {
+        openDetail(currentItem);
+      }
+    });
+    elements.changeRows.append(row);
+  }
+}
+
+function renderChangeBadge(type) {
+  const className = String(type || "unknown").replace(/\s+/g, "-");
+  return `<span class="change-badge ${escapeHtml(className)}">${escapeHtml(getChangeTypeLabel(type))}</span>`;
+}
+
+function detectChanges(baselineRows, currentRows, baselineMonth = "") {
+  const baseline = new Map(baselineRows.map((row) => [row.itemSeq, row]));
+  const current = new Map(currentRows.map((row) => [row.itemSeq, row]));
+  const changes = [];
+
+  for (const row of currentRows) {
+    const old = baseline.get(row.itemSeq);
+    if (!old) {
+      changes.push({
+        ...changeMeta(row, baselineMonth),
+        type: "new",
+        detail: `${row.itemPermitDate || "-"} · ${row.entpName || "-"}`
+      });
+      continue;
+    }
+
+    if (old.cancelCodeName !== row.cancelCodeName) {
+      changes.push({
+        ...changeMeta(row, baselineMonth),
+        type: "status",
+        from: old.cancelCodeName || "-",
+        to: row.cancelCodeName || "-",
+        detail: `${old.cancelCodeName || "-"} -> ${row.cancelCodeName || "-"}`
+      });
+    }
+
+    const changedFields = changedDocumentFields(old, row);
+    if (changedFields.length) {
+      changes.push({
+        ...changeMeta(row, baselineMonth),
+        type: "document",
+        changedFields,
+        detail: `${changedFields.join("/")} 변경`
+      });
+    }
+  }
+
+  for (const old of baselineRows) {
+    if (!current.has(old.itemSeq)) {
+      changes.push({
+        ...changeMeta(old, baselineMonth),
+        type: "removed",
+        detail: "기준월 이후 최신 DB에서 제외"
+      });
+    }
+  }
+
+  return changes;
+}
+
+function changeMeta(row, baselineMonth) {
+  return {
+    baselineMonth,
+    itemSeq: row.itemSeq,
+    itemName: row.itemName,
+    entpName: row.entpName,
+    itemPermitDate: row.itemPermitDate,
+    classNoName: row.classNoName,
+    permitKind: row.permitKind,
+    indutyCode: row.indutyCode,
+    cancelCodeName: row.cancelCodeName
+  };
+}
+
+function changedDocumentFields(oldRow, nextRow) {
+  const fields = [
+    ["efficacyText", "효능효과"],
+    ["dosageText", "용법용량"],
+    ["cautionText", "주의사항"]
+  ];
+  return fields.filter(([key]) => oldRow[key] !== nextRow[key]).map(([, label]) => label);
+}
+
+function getChangeSearchText(change) {
+  return [
+    change.type,
+    getChangeTypeLabel(change.type),
+    change.itemSeq,
+    change.itemName,
+    change.entpName,
+    change.classNoName,
+    change.permitKind,
+    change.indutyCode,
+    change.cancelCodeName,
+    change.detail
+  ]
+    .join(" ")
+    .toLowerCase();
+}
+
+function getChangeTypeLabel(type) {
+  return CHANGE_TYPE_LABELS[type] || type || "미기재";
 }
 
 function setPage(page) {
@@ -639,6 +961,56 @@ function exportCsv() {
   const link = document.createElement("a");
   link.href = url;
   link.download = `quasi-tracker-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportChangesCsv() {
+  const headers = [
+    "BASELINE_MONTH",
+    "CHANGE_TYPE",
+    "ITEM_SEQ",
+    "ITEM_NAME",
+    "ENTP_NAME",
+    "ITEM_PERMIT_DATE",
+    "CANCEL_CODE_NAME",
+    "CLASS_NO_NAME",
+    "PERMIT_KIND_CODE_NM",
+    "INDUTY_CODE",
+    "DETAIL",
+    "FROM",
+    "TO"
+  ];
+  const lines = [headers.join(",")];
+
+  for (const change of state.filteredChanges) {
+    lines.push(
+      [
+        change.baselineMonth,
+        getChangeTypeLabel(change.type),
+        change.itemSeq,
+        change.itemName,
+        change.entpName,
+        change.itemPermitDate,
+        change.cancelCodeName,
+        change.classNoName,
+        change.permitKind,
+        change.indutyCode,
+        change.detail,
+        change.from,
+        change.to
+      ]
+        .map(csvCell)
+        .join(",")
+    );
+  }
+
+  const month = state.selectedBaselineMonth || "baseline";
+  const blob = new Blob([`\uFEFF${lines.join("\n")}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `quasi-tracker-changes-${month}-${new Date().toISOString().slice(0, 10)}.csv`;
   link.click();
   URL.revokeObjectURL(url);
 }

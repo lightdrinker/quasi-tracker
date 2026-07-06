@@ -147,8 +147,62 @@
             </div>
 
             <section class="changes">
-              <h2>Latest Changes</h2>
-              <div id="changeList" class="change-list"></div>
+              <div class="changes-header">
+                <div>
+                  <h2>기준월 대비 변경사항</h2>
+                  <p id="changeSummary">기준월 데이터를 불러오는 중</p>
+                </div>
+                <button id="exportChangesButton" type="button">Export Changes</button>
+              </div>
+
+              <div class="change-controls">
+                <div class="field">
+                  <label for="baselineSelect">Baseline month</label>
+                  <select id="baselineSelect"></select>
+                </div>
+                <div class="field">
+                  <label for="changeTypeFilter">Change type</label>
+                  <select id="changeTypeFilter"></select>
+                </div>
+                <div class="field">
+                  <label for="changeClassFilter">Category</label>
+                  <select id="changeClassFilter"></select>
+                </div>
+                <div class="field">
+                  <label for="changeStatusFilter">Status</label>
+                  <select id="changeStatusFilter"></select>
+                </div>
+                <div class="field">
+                  <label for="changePermitFilter">Permit</label>
+                  <select id="changePermitFilter"></select>
+                </div>
+                <div class="field">
+                  <label for="changeIndutyFilter">Origin</label>
+                  <select id="changeIndutyFilter"></select>
+                </div>
+                <div class="field change-search-field">
+                  <label for="changeSearchInput">Search changes</label>
+                  <input id="changeSearchInput" type="search" placeholder="제품명, 업체명, 품목코드, 변경내용">
+                </div>
+              </div>
+
+              <div class="change-table-wrap">
+                <table class="change-table">
+                  <thead>
+                    <tr>
+                      <th>유형</th>
+                      <th>품목코드</th>
+                      <th>제품명</th>
+                      <th>업체명</th>
+                      <th>분류</th>
+                      <th>허가일</th>
+                      <th>상태</th>
+                      <th>변경내용</th>
+                    </tr>
+                  </thead>
+                  <tbody id="changeRows"></tbody>
+                </table>
+              </div>
             </section>
           </section>
         </section>
