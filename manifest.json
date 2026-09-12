@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 3,
+  "syncedAt": "2026-09-12T23:59:12.013Z",
+  "totalCount": 22960,
+  "rowsHash": "05d5bb65d7c0735a2a56b88dfc9d064792cdbae361e6cdd8025f12094cffa901",
+  "changeCount": 170,
+  "snapshotUrl": "snapshot.json",
+  "currentBaselineMonth": "2026-09",
+  "baselineRetentionMonths": 12,
+  "baselines": [
+    {
+      "month": "2026-09",
+      "syncedAt": "2026-09-01T01:16:47.306Z",
+      "totalCount": 22958,
+      "rowsHash": "72383d5ef4bfbcd79d02fe042a5d08ad5f44b2bec3187ec19153a96986e7b1a1",
+      "url": "baselines/2026-09.json"
+    },
+    {
+      "month": "2026-08",
+      "syncedAt": "2026-07-31T23:14:16.393Z",
+      "totalCount": 22960,
+      "rowsHash": "caa5fbd09b09afcc40c6d351d2dba1c785800d94bcaefc2773335448b7356cce",
+      "url": "baselines/2026-08.json"
+    },
+    {
+      "month": "2026-07",
+      "syncedAt": "2026-07-06T08:08:07.564Z",
+      "totalCount": 22953,
+      "rowsHash": "fc2dc08226147078af4c144c013b75b82934696bfe3973df544d9ef1b2ff848c",
+      "url": "baselines/2026-07.json"
+    }
+  ]
+}
